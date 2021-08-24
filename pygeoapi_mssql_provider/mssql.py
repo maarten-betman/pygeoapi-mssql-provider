@@ -2,8 +2,10 @@ import logging
 from datetime import date, datetime
 
 import pymssql
+import pyproj
 from shapely import wkt
 from shapely.geometry import box, mapping
+from shapely.ops import transform
 
 from .vendor import BaseProvider
 from .vendor.provider_base import (
@@ -87,7 +89,7 @@ class DatabaseConnection:
             self.fields = {
                 row["COLUMN_NAME"]: {
                     "type": row["DATA_TYPE"],
-                    "python_type": TYPES[row["DATA_TYPE"]],
+                    # "python_type": TYPES[row["DATA_TYPE"]],
                 }
                 for row in result
             }
@@ -307,7 +309,8 @@ class MsSqlProvider(BaseProvider):
             feature_collection = {"type": "FeatureCollection", "features": []}
 
             for rd in row_data:
-                feature_collection["features"].append(self.__response_feature(rd))
+                if rd['geometry'] is not None:
+                    feature_collection["features"].append(self.__response_feature(rd))
 
             return feature_collection
 
@@ -421,19 +424,24 @@ class MsSqlProvider(BaseProvider):
         -------
         `dict` of GeoJSON Feature
         """
-        if row_data:
-            feature = {"type": "Feature"}
-
-            geom = mapping(wkt.loads(row_data.pop("geometry")))
-
-            feature["geometry"] = geom if geom is not None else None  # noqa
-
-            feature["properties"] = row_data
-            feature["id"] = feature["properties"].get(self.id_field)
-
-            return feature
-        else:
+        if not row_data:
             return None
+        feature = {"type": "Feature"}
+
+        geom = wkt.loads(row_data.pop("geometry"))
+
+        if self.source_srid is not None and self.target_srid is not None:
+            target = pyproj.CRS(f'EPSG:{self.target_srid}')
+            source = pyproj.CRS(f'EPSG:{self.source_srid}')
+            project = pyproj.Transformer.from_crs(source, target, always_xy=True).transform
+            geom = transform(project, geom)
+
+        feature["geometry"] = mapping(geom) if geom is not None else None  # noqa
+
+        feature["properties"] = row_data
+        feature["id"] = feature["properties"].get(self.id_field)
+
+        return feature
 
     def __response_feature_hits(self, hits):
         """Assembles GeoJSON/Feature number

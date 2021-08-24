@@ -1,0 +1,29 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+- master
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+- task: UsePythonVersion@0
+  inputs:
+    versionSpec: 3.8
+  displayName: Install Python
+- script: |
+    python -m pip install -U pip
+    pip install poetry
+  displayName: Install software
+- script: |
+    poetry build
+  displayName: Package software
+- script: |
+    poetry config repositories.azure https://boskaliscode.pkgs.visualstudio.com/HydronamicGeoGroup/_packaging/BokaPI/pypi/upload
+    poetry config http-basic.azure betman $(System.AccessToken)
+    poetry publish -r azure
+    exit 0
+  displayName: Publish software
