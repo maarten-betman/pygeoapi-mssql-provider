@@ -89,3 +89,11 @@ def test_get_not_existing_item_raise_exception(config):
     p = MsSqlProvider(config)
     with pytest.raises(ProviderItemNotFoundError):
         p.get(-1)
+
+
+def test_coordinate_transfrom(config):
+    config["target_srid"] = 4326
+    p = MsSqlProvider(config)
+    result = p.get(4053)
+    assert "CPT-352" in result["properties"]["PointID"]
+    assert (104.0266684895768, 1.4295970427024443) == result["geometry"]["coordinates"]
