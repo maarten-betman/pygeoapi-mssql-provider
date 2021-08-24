@@ -97,3 +97,10 @@ def test_coordinate_transfrom(config):
     result = p.get(4053)
     assert "CPT-352" in result["properties"]["PointID"]
     assert (104.0266684895768, 1.4295970427024443) == result["geometry"]["coordinates"]
+
+
+def test_query(config):
+    config["target_srid"] = 4326
+    p = MsSqlProvider(config)
+    feature_collection = p.query(limit=2000)
+    assert True

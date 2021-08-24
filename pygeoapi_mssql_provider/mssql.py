@@ -142,6 +142,11 @@ class MsSqlProvider(BaseProvider):
 
         self.get_fields()
 
+        if self.source_srid is not None and self.target_srid is not None:
+            target = pyproj.CRS(f'EPSG:{self.target_srid}')
+            source = pyproj.CRS(f'EPSG:{self.source_srid}')
+            self.reproject = pyproj.Transformer.from_crs(source, target, always_xy=True).transform
+
     def get_fields(self):
         """
         Get fields from PostgreSQL table (columns are field)
@@ -431,10 +436,7 @@ class MsSqlProvider(BaseProvider):
         geom = wkt.loads(row_data.pop("geometry"))
 
         if self.source_srid is not None and self.target_srid is not None:
-            target = pyproj.CRS(f'EPSG:{self.target_srid}')
-            source = pyproj.CRS(f'EPSG:{self.source_srid}')
-            project = pyproj.Transformer.from_crs(source, target, always_xy=True).transform
-            geom = transform(project, geom)
+            geom = transform(self.reproject, geom)
 
         feature["geometry"] = mapping(geom) if geom is not None else None  # noqa
 
@@ -457,3 +459,4 @@ class MsSqlProvider(BaseProvider):
         """
 
         return {"features": [], "type": "FeatureCollection", "numberMatched": hits}
+
