@@ -87,7 +87,7 @@ class DatabaseConnection:
             self.fields = {
                 row["COLUMN_NAME"]: {
                     "type": row["DATA_TYPE"],
-                    "python_type": TYPES[row["DATA_TYPE"]],
+                    # "python_type": TYPES[row["DATA_TYPE"]],
                 }
                 for row in result
             }
