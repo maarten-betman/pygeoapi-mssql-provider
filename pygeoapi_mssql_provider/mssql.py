@@ -6,7 +6,11 @@ from shapely import wkt
 from shapely.geometry import box, mapping
 
 from .vendor import BaseProvider
-from .vendor.provider_base import ProviderConnectionError, ProviderQueryError
+from .vendor.provider_base import (
+    ProviderConnectionError,
+    ProviderItemNotFoundError,
+    ProviderQueryError,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -49,9 +53,6 @@ class DatabaseConnection:
     def __enter__(self):
         try:
             # rename dict keys to be compatible with pymssql
-            self.conn_dic["server"] = self.conn_dic.pop("host")
-            self.conn_dic["database"] = self.conn_dic.pop("dbname")
-
             self.conn = pymssql.connect(**self.conn_dic, charset="utf8")
 
         except pymssql.OperationalError:
@@ -81,7 +82,7 @@ class DatabaseConnection:
             )
             self.cur.execute(query_srid)
             result_srid = self.cur.fetchone()
-            self.srid = result_srid["srid"]
+            self.source_srid = result_srid["srid"]
 
             self.fields = {
                 row["COLUMN_NAME"]: {
@@ -148,7 +149,9 @@ class MsSqlProvider(BaseProvider):
         dict of fields
         """
         if not self.fields:
-            with DatabaseConnection(self.conn_dic, self.table) as db:
+            with DatabaseConnection(
+                self.conn_dic, self.table, geometry_column=self.geom
+            ) as db:
                 self.fields = db.fields
                 if self.source_srid is None:
                     self.source_srid = db.source_srid
@@ -172,12 +175,14 @@ class MsSqlProvider(BaseProvider):
 
         where_conditions = []
         if properties:
-            property_clauses = ["{} = {}".format(k, v) for k, v in properties]
+            property_clauses = ["{} = {!r}".format(k, v) for k, v in properties]
             where_conditions += property_clauses
         if bbox:
-            bbox_wkt = box(bbox).wkt
-            bbox_clause = "geometry::STGeomFromText({}, {}).STContains({})".format(
-                bbox_wkt, self.source_srid, self.geom
+            bbox_wkt = box(*bbox).wkt
+            bbox_clause = (
+                "geometry::STGeomFromText({!r}, {}).STContains({}) = 1 ".format(
+                    bbox_wkt, self.source_srid, self.geom
+                )
             )
             where_conditions.append(bbox_clause)
 
@@ -271,21 +276,29 @@ class MsSqlProvider(BaseProvider):
 
             where_clause = self.__get_where_clauses(properties=properties, bbox=bbox)
 
-            sql_query = 'SELECT {}, {}.STAsText() FROM {}{}'.format(
-                db.columns, self.geom, self.table, where_clause
+            sql_query = (
+                "SELECT {}, {}.STAsText() AS geometry FROM {}{} "
+                "ORDER BY {} "
+                "OFFSET {} ROWS "
+                "FETCH NEXT {} ROWS ONLY"
+            ).format(
+                db.columns,
+                self.geom,
+                self.table,
+                where_clause,
+                self.id_field,
+                startindex,
+                limit,
             )
 
             LOGGER.debug("SQL Query: {}".format(sql_query))
             LOGGER.debug("Start Index: {}".format(startindex))
             LOGGER.debug("End Index: {}".format(end_index))
+
             try:
                 cursor.execute(sql_query)
-                for index in [startindex, limit]:
-                    cursor.execute("fetch forward {} from geo_cursor".format(index))
             except Exception as err:
-                LOGGER.error(
-                    "Error executing sql_query: {}".format(sql_query.as_string(cursor))
-                )
+                LOGGER.error("Error executing sql_query: {}".format(sql_query))
                 LOGGER.error(err)
                 raise ProviderQueryError()
 
@@ -298,14 +311,104 @@ class MsSqlProvider(BaseProvider):
 
             return feature_collection
 
-    def get(self, identifier):
-        pass
+    def get_previous(self, cursor, identifier):
+        """
+        Query previous ID given current ID
 
-    def create(self, new_feature):
-        pass
+        Parameters
+        ----------
+        identifier : feature id
 
-    def update(self, identifier, new_feature):
-        pass
+        Returns
+        -------
+        feature id
+        """
+        sql = "SELECT TOP 1 {} AS id FROM {} WHERE {}<%s ORDER BY {} DESC".format(
+            self.id_field,
+            self.table,
+            self.id_field,
+            self.id_field,
+        )
+
+        LOGGER.debug("SQL Query: {}".format(sql))
+        cursor.execute(sql, (identifier,))
+        item = cursor.fetchall()
+        return item[0]["id"] if item else identifier
+
+    def get_next(self, cursor, identifier):
+        """
+        Query next ID given current ID
+
+        Parameters
+        ----------
+        identifier : feature id
+
+        Returns
+        -------
+        feature id
+        """
+        sql = "SELECT TOP 1 {} AS id FROM {} WHERE {}>%s ORDER BY {}".format(
+            self.id_field,
+            self.table,
+            self.id_field,
+            self.id_field,
+        )
+        LOGGER.debug("SQL Query: {}".format(sql))
+
+        cursor.execute(sql, (identifier,))
+        item = cursor.fetchall()
+        return item[0]["id"] if item else identifier
+
+    def get(self, identifier, **kwargs):
+        """
+        Query the provider for a specific
+        feature id e.g: /collections/hotosm_bdi_waterways/items/13990765
+
+        Parameters
+        ----------
+        identifier : feature id
+
+        Returns
+        -------
+        GeoJSON FeaturesCollection
+        """
+
+        LOGGER.debug("Get item from Postgis")
+        with DatabaseConnection(self.conn_dic, self.table, geometry_column=self.geom) as db:
+            cursor = db.conn.cursor(as_dict=True)
+
+            sql_query = (
+                "SELECT {}, {}.STAsText() AS geometry FROM {} " "WHERE {}=%s"
+            ).format(
+                db.columns,
+                self.geom,
+                self.table,
+                self.id_field,
+            )
+
+            LOGGER.debug("SQL Query: {}".format(sql_query))
+            LOGGER.debug("Identifier: {}".format(identifier))
+            try:
+                cursor.execute(sql_query, (identifier,))
+            except Exception as err:
+                LOGGER.error("Error executing sql_query: {}".format(sql_query))
+                LOGGER.error(err)
+                raise ProviderQueryError()
+
+            results = cursor.fetchall()
+            row_data = None
+            if results:
+                row_data = results[0]
+            feature = self.__response_feature(row_data)
+
+            if feature:
+                feature["prev"] = self.get_previous(cursor, identifier)
+                feature["next"] = self.get_next(cursor, identifier)
+                return feature
+            else:
+                err = "item {} not found".format(identifier)
+                LOGGER.error(err)
+                raise ProviderItemNotFoundError(err)
 
     def __response_feature(self, row_data):
         """
@@ -319,16 +422,14 @@ class MsSqlProvider(BaseProvider):
         `dict` of GeoJSON Feature
         """
         if row_data:
-            feature = {
-                'type': 'Feature'
-            }
+            feature = {"type": "Feature"}
 
             geom = mapping(wkt.loads(row_data.pop("geometry")))
 
-            feature['geometry'] = geom if geom is not None else None  # noqa
+            feature["geometry"] = geom if geom is not None else None  # noqa
 
-            feature['properties'] = row_data
-            feature['id'] = feature['properties'].get(self.id_field)
+            feature["properties"] = row_data
+            feature["id"] = feature["properties"].get(self.id_field)
 
             return feature
         else:
@@ -336,9 +437,15 @@ class MsSqlProvider(BaseProvider):
 
     def __response_feature_hits(self, hits):
         """Assembles GeoJSON/Feature number
-        e.g: http://localhost:5000/collections/
-        hotosm_bdi_waterways/items?resulttype=hits
-        :returns: GeoJSON FeaturesCollection
+        e.g: http://localhost:5000/collections/hotosm_bdi_waterways/items?resulttype=hits
+
+        Parameters
+        ----------
+        hits :
+
+        Returns
+        -------
+        GeoJSON FeaturesCollection
         """
 
         return {"features": [], "type": "FeatureCollection", "numberMatched": hits}
