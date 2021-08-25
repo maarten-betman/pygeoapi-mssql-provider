@@ -1,10 +1,7 @@
 import pytest
 
+from pygeoapi.provider.base import ProviderItemNotFoundError
 from pygeoapi_mssql_provider.mssql import MsSqlProvider, DatabaseConnection
-from pygeoapi_mssql_provider.log import setup_logger
-from pygeoapi_mssql_provider.vendor.provider_base import ProviderItemNotFoundError
-
-setup_logger({"level": "DEBUG"})
 
 
 @pytest.fixture()

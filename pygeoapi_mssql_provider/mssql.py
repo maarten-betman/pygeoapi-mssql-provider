@@ -6,26 +6,15 @@ import pyproj
 from shapely import wkt
 from shapely.geometry import box, mapping
 from shapely.ops import transform
-
-from .vendor import BaseProvider
-from .vendor.provider_base import (
+from pygeoapi.provider.base import (
+    BaseProvider,
     ProviderConnectionError,
     ProviderItemNotFoundError,
     ProviderQueryError,
 )
 
+
 LOGGER = logging.getLogger(__name__)
-
-
-TYPES = {
-    "bigint": int,
-    "float": float,
-    "int": int,
-    "nvarchar": str,
-    "varchar": str,
-    "date": date,
-    "datetime": datetime,
-}
 
 
 class DatabaseConnection:
@@ -143,9 +132,11 @@ class MsSqlProvider(BaseProvider):
         self.get_fields()
 
         if self.source_srid is not None and self.target_srid is not None:
-            target = pyproj.CRS(f'EPSG:{self.target_srid}')
-            source = pyproj.CRS(f'EPSG:{self.source_srid}')
-            self.reproject = pyproj.Transformer.from_crs(source, target, always_xy=True).transform
+            target = pyproj.CRS(f"EPSG:{self.target_srid}")
+            source = pyproj.CRS(f"EPSG:{self.source_srid}")
+            self.reproject = pyproj.Transformer.from_crs(
+                source, target, always_xy=True
+            ).transform
 
     def get_fields(self):
         """
@@ -210,7 +201,7 @@ class MsSqlProvider(BaseProvider):
         select_properties=[],
         skip_geometry=False,
         q=None,
-        **kwargs
+        **kwargs,
     ):
         """
         Query MSSQL for all the content.
@@ -314,7 +305,7 @@ class MsSqlProvider(BaseProvider):
             feature_collection = {"type": "FeatureCollection", "features": []}
 
             for rd in row_data:
-                if rd['geometry'] is not None:
+                if rd["geometry"] is not None:
                     feature_collection["features"].append(self.__response_feature(rd))
 
             return feature_collection
@@ -382,7 +373,9 @@ class MsSqlProvider(BaseProvider):
         """
 
         LOGGER.debug("Get item from Postgis")
-        with DatabaseConnection(self.conn_dic, self.table, geometry_column=self.geom) as db:
+        with DatabaseConnection(
+            self.conn_dic, self.table, geometry_column=self.geom
+        ) as db:
             cursor = db.conn.cursor(as_dict=True)
 
             sql_query = (
@@ -459,4 +452,3 @@ class MsSqlProvider(BaseProvider):
         """
 
         return {"features": [], "type": "FeatureCollection", "numberMatched": hits}
-
