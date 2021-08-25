@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pygeoapi-mssql-provider"
-version = "0.1.2"
+version = "0.2.0"
 description = ""
 authors = ["maarten-betman <maarten.betman@boskalis.com>"]
 
