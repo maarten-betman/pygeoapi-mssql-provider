@@ -1,6 +1,6 @@
 # pygeoapi-mssql-providor
 
-Providor to add mssql containing spatial columns.
+Providor to add mssql tables containing spatial columns.
 
 > NOTE: This package isn't secure yet against SQL injection. 
 
