@@ -1,12 +1,12 @@
-# pygeoapi-mssql-providor
+# pygeoapi-mssql-provider
 
-Providor to add mssql containing spatial columns.
+Provider to add mssql containing spatial columns.
 
-> NOTE: This package isn't secure yet against SQL injection. 
+> NOTE: This package isn't tested against SQL injection. 
 
 To install:
 ```commandline
-pip install pygeoapi-mssql-providor
+pip install pygeoapi-mssql-provider
 ```
 
 ```yaml
